@@ -4,7 +4,7 @@ how to install:
 
 git clone https://github.com/Goldenavs/AI-Audio-Video-Grader.git
 
-cd AI-Audio-Video-Grader
+cd AI-Audio-Grader
 
 cd frontend
 
