@@ -1,7 +1,8 @@
 import pandas as pd
 import json
+import os
 from dotenv import load_dotenv
-from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import PromptTemplate
 
 load_dotenv()
@@ -120,7 +121,15 @@ Student Answer:
     input_variables=["answer"]
 )
 
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+# Grab the key from the environment, or hardcode it as a string here temporarily for testing if .env fails
+GEMINI_KEY = os.getenv("GOOGLE_API_KEY", "YOUR_ACTUAL_API_KEY_HERE")
+
+# Pass the api_key explicitly to bypass the Pydantic validation error
+llm = ChatGoogleGenerativeAI(
+    model="gemini-2.5-flash", 
+    temperature=0,
+    api_key=GEMINI_KEY
+)
 
 results = []
 

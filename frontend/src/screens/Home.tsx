@@ -68,17 +68,13 @@ export default function Home() {
   const preventDefaults = (e: DragEvent<HTMLDivElement>) => e.preventDefault();
   
   // Simulated Pipeline Execution
-// Real Pipeline Execution
+  // Real Pipeline Execution
   const startAnalysis = async () => {
     if (audioFiles.length === 0 || !humanScoresFile) return;
     setIsProcessing(true);
     
     const formData = new FormData();
-    
-    // Append the CSV
     formData.append("human_scores", humanScoresFile);
-    
-    // Append all audio files
     audioFiles.forEach((file) => {
       formData.append("audio_files", file, file.name);
     });
@@ -89,13 +85,21 @@ export default function Home() {
         body: formData,
       });
 
-      if (!response.ok) throw new Error("Backend processing failed");
+      // 1. Check for standard HTTP errors (e.g., 500 Internal Server Error)
+      if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
       
       const data = await response.json();
+
+      // 2. NEW: Check for our custom backend pipeline errors
+      if (data.error) {
+         throw new Error(data.error);
+      }
+
       setResults(data);
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      alert("Error connecting to the backend. Is the FastAPI server running?");
+      // Alert the actual error message to the screen so you don't have to check the terminal
+      alert(`Processing Failed:\n${error.message}`);
     } finally {
       setIsProcessing(false);
     }
@@ -273,7 +277,7 @@ export default function Home() {
                     </>
                   )}
                 </div>
-                
+
               </div>
             </motion.div>
           )}

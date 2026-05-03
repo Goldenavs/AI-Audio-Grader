@@ -35,4 +35,4 @@ plt.text(0.05, 0.95, textstr, transform=plt.gca().transAxes,
 plt.savefig("Figure2_Scatter.png", dpi=300, bbox_inches="tight")
 
 # Show plot
-plt.show()
+# plt.show()

@@ -5,8 +5,14 @@ import csv
 AUDIO_FOLDER = "audio"
 OUTPUT_CSV = "transcripts.csv"
 
+# audioAnalyzer.py
+
+print("Loading Whisper AI model into memory (this may take 1-2 minutes on CPU)...")
+
 # Load model (choose: tiny, base, small, medium, large)
 model = whisper.load_model("small")  # good balance of speed + accuracy
+
+print("✅ Model loaded successfully! Starting transcription...")
 
 results = []
 

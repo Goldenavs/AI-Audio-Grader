@@ -5,6 +5,7 @@ import os
 import subprocess
 import base64
 import re
+import sys
 
 app = FastAPI()
 
@@ -42,26 +43,34 @@ async def batch_analyze(
     # 4. Execute the Professor's Pipeline Sequentially
     try:
         print("Running Audio Analyzer...")
-        subprocess.run(["python", "audioAnalyzer.py"], check=True)
+        # Use sys.executable instead of "python"
+        subprocess.run([sys.executable, "audioAnalyzer.py"], check=True)
         
         print("Running LangChain Scoring...")
-        subprocess.run(["python", "langchain_scoring.py"], check=True)
+        subprocess.run([sys.executable, "langchain_scoring.py"], check=True)
         
         print("Running Statistical Analysis...")
-        # Capture the output of analysis.py to extract the print statements
-        analysis_process = subprocess.run(["python", "analysis.py"], capture_output=True, text=True, check=True)
+        analysis_process = subprocess.run([sys.executable, "analysis.py"], capture_output=True, text=True, check=True)
         output_text = analysis_process.stdout
         print(output_text)
 
         print("Generating Scatter Plot...")
-        subprocess.run(["python", "scatter_plot.py"], check=True)
+        subprocess.run([sys.executable, "scatter_plot.py"], check=True)
 
     except subprocess.CalledProcessError as e:
-        return {"error": f"Pipeline failed during execution. {e}"}
+        # Extract the hidden error trace if it exists
+        error_message = e.stderr if e.stderr else str(e)
+        
+        # Print it to your backend terminal so YOU can see it
+        print(f"\n❌ PIPELINE CRASHED:\n{error_message}")
+        
+        # Send it to the React frontend so the user sees it
+        return {"error": f"Pipeline failed: {error_message}"}
 
-    # 5. Extract Stats using Regex from the stdout
+    # main.py (Inside batch_analyze)
     def extract_val(label):
-        match = re.search(rf"{label}:\s*([0-9.]+)", output_text)
+        # Added [-] to the regex to catch negative numbers
+        match = re.search(rf"{label}:\s*([-0-9.]+)", output_text) 
         return float(match.group(1)) if match else 0.0
 
     # 6. Encode the generated plot to Base64 so React can display it instantly

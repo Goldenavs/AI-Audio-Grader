@@ -19,10 +19,16 @@ merged.to_csv("final_dataset.csv", index=False)
 human_total = merged["HumanScore"]
 ai_total = merged["AI_total"]
 
-r, p = pearsonr(human_total, ai_total)
-sr, sp = spearmanr(human_total, ai_total)
+# ADD THIS CHECK:
+if len(merged) > 1:
+    r, p = pearsonr(human_total, ai_total)
+    sr, sp = spearmanr(human_total, ai_total)
+else:
+    r, p, sr, sp = 0.0, 0.0, 0.0, 0.0
 
 diff = abs(human_total - ai_total)
+
+print("Final rows:", len(merged))
 
 print("Final rows:", len(merged))
 print("Pearson r:", r)
@@ -31,4 +37,4 @@ print("Spearman r:", sr)
 print("Spearman p:", sp)
 print("Mean Absolute Difference:", diff.mean())
 
-print("✅ Saved final_dataset.csv")
+print("Done! Saved final_dataset.csv")
