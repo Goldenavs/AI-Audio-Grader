@@ -12,6 +12,7 @@ interface BatchResults {
   spearmanR: number;
   spearmanP: number;
   meanAbsDiff: number;
+  plotImageUrl: string; // <-- Add this
 }
 
 // Custom Icons
@@ -67,22 +68,37 @@ export default function Home() {
   const preventDefaults = (e: DragEvent<HTMLDivElement>) => e.preventDefault();
   
   // Simulated Pipeline Execution
+// Real Pipeline Execution
   const startAnalysis = async () => {
     if (audioFiles.length === 0 || !humanScoresFile) return;
     setIsProcessing(true);
     
-    // Simulating the delay of audioAnalyzer.py, langchain_scoring.py, and analysis.py
-    setTimeout(() => {
-      setResults({
-        totalRows: audioFiles.length,
-        pearsonR: 0.892,
-        pearsonP: 0.0001,
-        spearmanR: 0.875,
-        spearmanP: 0.0002,
-        meanAbsDiff: 1.25
+    const formData = new FormData();
+    
+    // Append the CSV
+    formData.append("human_scores", humanScoresFile);
+    
+    // Append all audio files
+    audioFiles.forEach((file) => {
+      formData.append("audio_files", file, file.name);
+    });
+
+    try {
+      const response = await fetch("http://localhost:8000/api/batch-analyze", {
+        method: "POST",
+        body: formData,
       });
+
+      if (!response.ok) throw new Error("Backend processing failed");
+      
+      const data = await response.json();
+      setResults(data);
+    } catch (error) {
+      console.error(error);
+      alert("Error connecting to the backend. Is the FastAPI server running?");
+    } finally {
       setIsProcessing(false);
-    }, 3500);
+    }
   };
 
   const isFormReady = audioFiles.length > 0 && humanScoresFile && !isProcessing;
@@ -246,12 +262,18 @@ export default function Home() {
 
                 </div>
 
-                {/* Graph Placeholder (Where Figure2_Scatter.png will go) */}
-                <div style={{ height: '300px', backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: '20px', border: '1px dashed rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
-                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18"/><path d="M18.7 8l-5.1 5.2-2.8-2.7L7 14.3"/></svg>
-                  <p style={{ color: '#64748b', marginTop: '15px', fontWeight: '500' }}>Awaiting Figure2_Scatter.png from Backend</p>
+                {/* Graph Render (Figure2_Scatter.png) */}
+                <div style={{ height: '350px', backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: '20px', border: '1px dashed rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', overflow: 'hidden' }}>
+                  {results.plotImageUrl ? (
+                    <img src={results.plotImageUrl} alt="Regression Scatter Plot" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                  ) : (
+                    <>
+                      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18"/><path d="M18.7 8l-5.1 5.2-2.8-2.7L7 14.3"/></svg>
+                      <p style={{ color: '#64748b', marginTop: '15px', fontWeight: '500' }}>Awaiting Figure2_Scatter.png from Backend</p>
+                    </>
+                  )}
                 </div>
-
+                
               </div>
             </motion.div>
           )}
