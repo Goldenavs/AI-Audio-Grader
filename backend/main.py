@@ -73,13 +73,22 @@ async def batch_analyze(
         match = re.search(rf"{label}:\s*([-0-9.]+)", output_text) 
         return float(match.group(1)) if match else 0.0
 
-    # 6. Encode the generated plot to Base64 so React can display it instantly
+    # Encode the generated plot to Base64 so React can display it instantly
     img_b64 = ""
     if os.path.exists("Figure2_Scatter.png"):
         with open("Figure2_Scatter.png", "rb") as img:
             img_b64 = base64.b64encode(img.read()).decode("utf-8")
 
-    # 7. Return the payload matching the React interface
+    # --- NEW: Read Transcripts to send to Frontend ---
+    import csv
+    transcripts_data = []
+    if os.path.exists("transcripts.csv"):
+        with open("transcripts.csv", "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            transcripts_data = list(reader)
+    # -------------------------------------------------
+
+    # Return the payload matching the React interface
     return {
         "totalRows": extract_val("Final rows"),
         "pearsonR": extract_val("Pearson r"),
@@ -87,7 +96,8 @@ async def batch_analyze(
         "spearmanR": extract_val("Spearman r"),
         "spearmanP": extract_val("Spearman p"),
         "meanAbsDiff": round(extract_val("Mean Absolute Difference"), 2),
-        "plotImageUrl": f"data:image/png;base64,{img_b64}"
+        "plotImageUrl": f"data:image/png;base64,{img_b64}",
+        "transcripts": transcripts_data # <--- Add this
     }
 
 if __name__ == "__main__":

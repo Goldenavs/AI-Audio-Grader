@@ -1,3 +1,3 @@
 audio_file,accuracy,depth,reasoning,clarity,feedback
 1.mp3,0,0,0,0,"The student's response consists solely of greetings and does not contain any information relevant to either of the possible questions. No technical concepts, explanations, or examples were provided. Therefore, all criteria are scored at 0."
-2.mp3,0,0,0,0,"The response 'One, two, three.' does not address either of the potential questions. It contains no technical content related to TCP/IP, OSI models, classful, or classless routing, making it impossible to evaluate against the grading criteria. All required concepts are entirely missing."
+2.mp3,0,0,0,0,"The student's response, ""One, two, three."", does not address either of the potential questions (TCP/IP and OSI Models or Classful vs Classless Routing). No relevant information or concepts were provided, making it impossible to assess understanding of the subject matter. All criteria are scored at 0."
