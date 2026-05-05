@@ -1,15 +1,22 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 import shutil
 import os
-import subprocess
 import base64
-import re
-import sys
+import json
+import csv
+import asyncio
+import threading
+
+# Import your newly refactored modules
+import audioAnalyzer
+import langchain_scoring
+import analysis
+import scatter_plot
 
 app = FastAPI()
 
-# Allow React frontend to communicate with this API
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"], # Vite's default port
@@ -23,82 +30,71 @@ async def batch_analyze(
     human_scores: UploadFile = File(...),
     audio_files: list[UploadFile] = File(...)
 ):
-    print(f"Received {len(audio_files)} audio files and {human_scores.filename}")
-
+    
     # 1. Clean and Setup Directories
     if os.path.exists("audio"):
         shutil.rmtree("audio")
     os.makedirs("audio", exist_ok=True)
 
-    # 2. Save the Human Scores CSV
     with open("human_scores.csv", "wb") as f:
         shutil.copyfileobj(human_scores.file, f)
 
-    # 3. Save the Audio Files
     for af in audio_files:
-        file_path = os.path.join("audio", af.filename)
-        with open(file_path, "wb") as f:
+        with open(os.path.join("audio", af.filename), "wb") as f:
             shutil.copyfileobj(af.file, f)
 
-    # 4. Execute the Professor's Pipeline Sequentially
-    try:
-        print("Running Audio Analyzer...")
-        # Use sys.executable instead of "python"
-        subprocess.run([sys.executable, "audioAnalyzer.py"], check=True)
-        
-        print("Running LangChain Scoring...")
-        subprocess.run([sys.executable, "langchain_scoring.py"], check=True)
-        
-        print("Running Statistical Analysis...")
-        analysis_process = subprocess.run([sys.executable, "analysis.py"], capture_output=True, text=True, check=True)
-        output_text = analysis_process.stdout
-        print(output_text)
+    # 2. Setup the Stream Queue
+    q = asyncio.Queue()
+    loop = asyncio.get_running_loop()
 
-        print("Generating Scatter Plot...")
-        subprocess.run([sys.executable, "scatter_plot.py"], check=True)
+    # The callback that your modules will use to send progress
+    def progress_cb(message: str):
+        payload = json.dumps({"type": "progress", "message": message}) + "\n"
+        asyncio.run_coroutine_threadsafe(q.put(payload), loop)
 
-    except subprocess.CalledProcessError as e:
-        # Extract the hidden error trace if it exists
-        error_message = e.stderr if e.stderr else str(e)
-        
-        # Print it to your backend terminal so YOU can see it
-        print(f"\n❌ PIPELINE CRASHED:\n{error_message}")
-        
-        # Send it to the React frontend so the user sees it
-        return {"error": f"Pipeline failed: {error_message}"}
+    # 3. The Background Task
+    def run_pipeline():
+        try:
+            # Execute imported modules as functions
+            audioAnalyzer.run_transcription("audio", "transcripts.csv", progress_cb)
+            langchain_scoring.run_scoring("transcripts.csv", "assessment_results.csv", progress_cb)
+            stats = analysis.run_analysis("human_scores.csv", "assessment_results.csv", "final_dataset.csv", progress_cb)
+            scatter_plot.generate_plot("final_dataset.csv", "Figure2_Scatter.png", progress_cb)
 
-    # main.py (Inside batch_analyze)
-    def extract_val(label):
-        # Added [-] to the regex to catch negative numbers
-        match = re.search(rf"{label}:\s*([-0-9.]+)", output_text) 
-        return float(match.group(1)) if match else 0.0
+            # Package final data
+            img_b64 = ""
+            if os.path.exists("Figure2_Scatter.png"):
+                with open("Figure2_Scatter.png", "rb") as img:
+                    img_b64 = base64.b64encode(img.read()).decode("utf-8")
 
-    # Encode the generated plot to Base64 so React can display it instantly
-    img_b64 = ""
-    if os.path.exists("Figure2_Scatter.png"):
-        with open("Figure2_Scatter.png", "rb") as img:
-            img_b64 = base64.b64encode(img.read()).decode("utf-8")
+            transcripts_data = []
+            if os.path.exists("transcripts.csv"):
+                with open("transcripts.csv", "r", encoding="utf-8") as f:
+                    transcripts_data = list(csv.DictReader(f))
 
-    # --- NEW: Read Transcripts to send to Frontend ---
-    import csv
-    transcripts_data = []
-    if os.path.exists("transcripts.csv"):
-        with open("transcripts.csv", "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            transcripts_data = list(reader)
-    # -------------------------------------------------
+            stats["plotImageUrl"] = f"data:image/png;base64,{img_b64}"
+            stats["transcripts"] = transcripts_data
 
-    # Return the payload matching the React interface
-    return {
-        "totalRows": extract_val("Final rows"),
-        "pearsonR": extract_val("Pearson r"),
-        "pearsonP": extract_val("Pearson p"),
-        "spearmanR": extract_val("Spearman r"),
-        "spearmanP": extract_val("Spearman p"),
-        "meanAbsDiff": round(extract_val("Mean Absolute Difference"), 2),
-        "plotImageUrl": f"data:image/png;base64,{img_b64}",
-        "transcripts": transcripts_data # <--- Add this
-    }
+            # Send final success payload
+            payload = json.dumps({"type": "result", "data": stats}) + "\n"
+            asyncio.run_coroutine_threadsafe(q.put(payload), loop)
+
+        except Exception as e:
+            payload = json.dumps({"type": "error", "message": str(e)}) + "\n"
+            asyncio.run_coroutine_threadsafe(q.put(payload), loop)
+
+    # Start the heavy lifting in a separate thread
+    threading.Thread(target=run_pipeline, daemon=True).start()
+
+    # 4. Stream consumer yielding to the frontend
+    async def event_generator():
+        while True:
+            chunk = await q.get()
+            yield chunk
+            if '"type": "result"' in chunk or '"type": "error"' in chunk:
+                break
+
+    return StreamingResponse(event_generator(), media_type="application/x-ndjson")
 
 if __name__ == "__main__":
     import uvicorn

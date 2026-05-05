@@ -7,13 +7,11 @@ from langchain_core.prompts import PromptTemplate
 
 load_dotenv()
 
-INPUT_CSV = "transcripts.csv"
-OUTPUT_CSV = "assessment_results.csv"
-
-df = pd.read_csv(INPUT_CSV)
-
-prompt = PromptTemplate(
-    template="""
+def run_scoring(input_csv: str, output_csv: str, progress_cb):
+    df = pd.read_csv(input_csv)
+    
+    prompt = PromptTemplate(
+        template="""
 Return ONLY valid JSON. No text before or after.
 
 You are a strict Data Communication and Networking instructor.
@@ -118,58 +116,32 @@ Return STRICT JSON in EXACT format:
 Student Answer:
 {answer}
 """,
-    input_variables=["answer"]
-)
+        input_variables=["answer"]
+    )
 
-# Grab the key from the environment, or hardcode it as a string here temporarily for testing if .env fails
-GEMINI_KEY = os.getenv("GOOGLE_API_KEY", "YOUR_ACTUAL_API_KEY_HERE")
+    GEMINI_KEY = os.getenv("GOOGLE_API_KEY", "YOUR_ACTUAL_API_KEY_HERE")
+    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0, api_key=GEMINI_KEY)
 
-# Pass the api_key explicitly to bypass the Pydantic validation error
-llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash", 
-    temperature=0,
-    api_key=GEMINI_KEY
-)
+    results = []
+    for i, row in df.iterrows():
+        transcript = row["transcript"]
+        progress_cb(f"Scoring response {i+1} via LangChain...")
 
-results = []
+        response = llm.invoke(prompt.format(answer=transcript)).content
 
-for i, row in df.iterrows():
-    transcript = row["transcript"]
+        start = response.find("{")
+        end = response.rfind("}") + 1
+        clean = response[start:end]
 
-    print(f"Scoring response {i+1}")
+        try:
+            data = json.loads(clean)
+        except:
+            retry = llm.invoke(prompt.format(answer=transcript)).content
+            clean = retry[retry.find("{"):retry.rfind("}")+1]
+            data = json.loads(clean)
 
-    response = llm.invoke(prompt.format(answer=transcript)).content
+        results.append([row["audio_file"], data["accuracy"], data["depth"], data["reasoning"], data["clarity"], data["feedback"]])
 
-    start = response.find("{")
-    end = response.rfind("}") + 1
-    clean = response[start:end]
-
-    try:
-        data = json.loads(clean)
-    except:
-        retry = llm.invoke(prompt.format(answer=transcript)).content
-        clean = retry[retry.find("{"):retry.rfind("}")+1]
-        data = json.loads(clean)
-
-    results.append([
-        row["audio_file"],
-        data["accuracy"],
-        data["depth"],
-        data["reasoning"],
-        data["clarity"],
-        data["feedback"]
-    ])
-
-# CREATE DataFrame BEFORE saving
-output_df = pd.DataFrame(results, columns=[
-    "audio_file",
-    "accuracy",
-    "depth",
-    "reasoning",
-    "clarity",
-    "feedback"
-])
-
-output_df.to_csv(OUTPUT_CSV, index=False)
-
-print("\n✅ Done! Saved AI assessment to assessment_results.csv")
+    output_df = pd.DataFrame(results, columns=["audio_file", "accuracy", "depth", "reasoning", "clarity", "feedback"])
+    output_df.to_csv(output_csv, index=False)
+    progress_cb("✅ Done! Saved AI assessment to assessment_results.csv")

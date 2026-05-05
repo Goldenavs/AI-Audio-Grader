@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import InteractiveBackground from '../components/InteractiveBackground';
 import GlowingCard from '../components/GlowingCard';
 
-// Updated Interface to include Transcripts
+// Interfaces
 interface Transcript {
   audio_file: string;
   transcript: string;
@@ -18,7 +18,7 @@ interface BatchResults {
   spearmanP: number;
   meanAbsDiff: number;
   plotImageUrl: string;
-  transcripts: Transcript[]; // <-- Added Transcripts
+  transcripts: Transcript[];
 }
 
 // Custom Icons
@@ -49,7 +49,7 @@ export default function Home() {
   const [isDraggingCsv, setIsDraggingCsv] = useState<boolean>(false);
   const csvInputRef = useRef<HTMLInputElement>(null);
 
-  // --- NEW: Helper to recursively read dropped folders ---
+  // Helper to recursively read dropped folders
   const getFilesFromEntry = async (entry: any): Promise<File[]> => {
     if (entry.isFile) {
       return new Promise((resolve) => {
@@ -68,7 +68,7 @@ export default function Home() {
     return [];
   };
 
-  // --- UPDATED: Shared Audio Filter ---
+  // Shared Audio Filter
   const processAudioFiles = (files: File[]) => {
     const audioOnly = files.filter(f => f.type.startsWith('audio/') || f.name.match(/\.(mp3|wav|m4a|aac|flac|ogg)$/i));
     if (audioOnly.length > 0) {
@@ -78,21 +78,18 @@ export default function Home() {
     }
   };
 
-  // --- UPDATED: Click Input Handler ---
   const handleFolderChange = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) processAudioFiles(Array.from(e.target.files));
   };
 
-  // --- NEW: Drag & Drop Folder Handler ---
+  // Drag & Drop Folder Handler
   const handleFolderDrop = async (e: DragEvent<HTMLDivElement>) => {
     preventDefaults(e);
     setIsDraggingMedia(false);
 
     if (e.dataTransfer.items) {
-      // Use DataTransferItem API to access the FileSystemEntry
       const items = Array.from(e.dataTransfer.items);
       const filePromises = items.map(item => {
-        // webkitGetAsEntry handles both files and directories
         if (item.webkitGetAsEntry) {
           const entry = item.webkitGetAsEntry();
           if (entry) return getFilesFromEntry(entry);
@@ -100,10 +97,8 @@ export default function Home() {
         return [];
       });
       
-      // Wait for all nested files to be found
       const nestedFiles = await Promise.all(filePromises);
       const allFiles = nestedFiles.flat();
-      
       processAudioFiles(allFiles);
     }
   };
@@ -123,12 +118,12 @@ export default function Home() {
 
   const preventDefaults = (e: DragEvent<HTMLDivElement>) => e.preventDefault();
   
-  // Pipeline Execution
+  // Pipeline Execution (Real-Time Stream with BUFFERING)
   const startAnalysis = async () => {
     if (audioFiles.length === 0 || !humanScoresFile) return;
     setIsProcessing(true);
     setProgress(0);
-    setLoadingStatus("Initializing setup and directories...");
+    setLoadingStatus("Connecting to backend pipeline...");
     setShowTranscripts(false);
     
     const formData = new FormData();
@@ -137,29 +132,6 @@ export default function Home() {
       formData.append("audio_files", file, file.name);
     });
 
-    // --- Simulated Progress Bar Logic ---
-    const stages = [
-      { threshold: 10, text: "Loading Whisper AI model into memory..." },
-      { threshold: 30, text: "Transcribing audio files to text..." },
-      { threshold: 60, text: "Evaluating transcripts via LangChain & Gemini..." },
-      { threshold: 85, text: "Computing Pearson & Spearman correlations..." },
-      { threshold: 99, text: "Finalizing dataset and plotting charts..." }
-    ];
-
-    const progressInterval = setInterval(() => {
-      setProgress(prev => {
-        // Slowly creep up the progress bar, maxing out at 99% until real fetch finishes
-        const next = prev + (prev < 90 ? Math.random() * 4 : Math.random() * 0.5);
-        const capped = Math.min(next, 99);
-        
-        // Update the status text based on current percentage
-        const currentStage = stages.slice().reverse().find(s => capped >= s.threshold);
-        if (currentStage) setLoadingStatus(currentStage.text);
-        
-        return capped;
-      });
-    }, 1200);
-
     try {
       const response = await fetch("http://localhost:8000/api/batch-analyze", {
         method: "POST",
@@ -167,22 +139,65 @@ export default function Home() {
       });
 
       if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
-      const data = await response.json();
+      if (!response.body) throw new Error("ReadableStream not supported by browser.");
 
-      if (data.error) throw new Error(data.error);
-
-      // Force 100% when data successfully returns
-      clearInterval(progressInterval);
-      setProgress(100);
-      setLoadingStatus("Analysis Complete!");
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder("utf-8");
       
-      setTimeout(() => {
-        setResults(data);
-        setIsProcessing(false);
-      }, 800); // Slight delay so user sees "100%" before transition
+      // THE FIX: An accumulator to hold incomplete chunks of data
+      let buffer = "";
 
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        // Append the new incoming chunk to our existing buffer
+        buffer += decoder.decode(value, { stream: true });
+
+        // Look for the newline character which tells us a JSON string is complete
+        let boundary = buffer.indexOf("\n");
+
+        while (boundary !== -1) {
+          // Extract the complete line
+          const line = buffer.slice(0, boundary).trim();
+          
+          // Remove the processed line from the buffer
+          buffer = buffer.slice(boundary + 1);
+          
+          // Check for the next newline in case multiple lines arrived at once
+          boundary = buffer.indexOf("\n");
+
+          if (!line) continue;
+
+          // 1. SAFELY PARSE JSON FIRST
+          let parsed;
+          try {
+            parsed = JSON.parse(line);
+          } catch (err) {
+            console.error("Stream parse error on line:", line);
+            continue; // Skip this broken line but keep the stream alive
+          }
+          
+          // 2. HANDLE BUSINESS LOGIC OUTSIDE THE TRY/CATCH
+          if (parsed.type === "progress") {
+            setLoadingStatus(parsed.message);
+            setProgress(prev => Math.min(prev + (Math.random() * 5), 95)); 
+          } 
+          else if (parsed.type === "result") {
+            setProgress(100);
+            setLoadingStatus("Analysis Complete!");
+            setTimeout(() => {
+              setResults(parsed.data);
+              setIsProcessing(false);
+            }, 800);
+          }
+          else if (parsed.type === "error") {
+            // This will now successfully escape the stream loop and trigger the outer catch block!
+            throw new Error(parsed.message);
+          }
+        }
+      }
     } catch (error: any) {
-      clearInterval(progressInterval);
       setProgress(0);
       setIsProcessing(false);
       console.error(error);
@@ -205,11 +220,9 @@ export default function Home() {
           initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1, ...springTransition }}
           style={{ textAlign: 'center', marginBottom: '60px' }}
         >
-          {/* UPDATED: Data Analytics */}
           <div style={{ display: 'inline-block', padding: '6px 16px', backgroundColor: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.2)', borderRadius: '20px', color: '#38bdf8', fontSize: '0.8rem', fontWeight: '700', letterSpacing: '2px', marginBottom: '20px', textTransform: 'uppercase' }}>
             Data Analytics
           </div>
-          {/* UPDATED: AI Audio Grader */}
           <h1 style={{ fontSize: '4rem', fontWeight: '800', margin: '0 0 15px 0', background: 'linear-gradient(135deg, #ffffff 0%, #e2e8f0 50%, #94a3b8 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', letterSpacing: '-2px' }}>
             AI Audio Grader<span style={{ color: '#38bdf8' }}>.</span>
           </h1>
@@ -217,7 +230,7 @@ export default function Home() {
 
         <div style={{ display: 'flex', gap: '30px', marginBottom: '40px', flexWrap: 'wrap', alignItems: 'stretch' }}>
           
-          {/* --- LEFT COLUMN: FOLDER INPUT --- */}
+          {/* FOLDER INPUT */}
           <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2, ...springTransition }} style={{ flex: '1 1 450px' }}>
             <GlowingCard accentColor="blue" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '25px' }}>
@@ -228,7 +241,6 @@ export default function Home() {
               <motion.div 
                 onDragOver={(e) => { preventDefaults(e); setIsDraggingMedia(true); }}
                 onDragLeave={(e) => { preventDefaults(e); setIsDraggingMedia(false); }}
-                // UPDATED: Now uses handleFolderDrop
                 onDrop={handleFolderDrop}
                 onClick={() => folderInputRef.current?.click()}
                 whileHover={{ scale: 1.01, backgroundColor: 'rgba(56, 189, 248, 0.08)' }}
@@ -254,7 +266,7 @@ export default function Home() {
             </GlowingCard>
           </motion.div>
 
-          {/* --- RIGHT COLUMN: CSV UPLOAD --- */}
+          {/* CSV UPLOAD */}
           <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3, ...springTransition }} style={{ flex: '1 1 450px' }}>
             <GlowingCard accentColor="orange" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '25px' }}>
@@ -289,21 +301,22 @@ export default function Home() {
           </motion.div>
         </div>
 
-        {/* --- PROCESS BUTTON & PROGRESS BAR --- */}
+        {/* PROCESS BUTTON & PROGRESS BAR */}
         <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4, ...springTransition }}>
           {!isProcessing ? (
             <motion.button 
               whileHover={{ scale: !isFormReady ? 1 : 1.01 }} whileTap={{ scale: !isFormReady ? 1 : 0.98 }}
               onClick={startAnalysis} disabled={!isFormReady}
-              style={{ width: '100%', padding: '24px', fontSize: '1.2rem', fontWeight: '700', letterSpacing: '2px', background: !isFormReady ? 'rgba(30, 41, 59, 0.5)' : 'linear-gradient(90deg, #0284c7, #ea580c)', color: !isFormReady ? '#64748b' : 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '20px', cursor: !isFormReady ? 'not-allowed' : 'pointer', transition: 'all 0.3s ease', textTransform: 'uppercase' }}
+              // THE FIX: Added boxSizing: 'border-box' below
+              style={{ boxSizing: 'border-box', width: '100%', padding: '24px', fontSize: '1.2rem', fontWeight: '700', letterSpacing: '2px', background: !isFormReady ? 'rgba(30, 41, 59, 0.5)' : 'linear-gradient(90deg, #0284c7, #ea580c)', color: !isFormReady ? '#64748b' : 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '20px', cursor: !isFormReady ? 'not-allowed' : 'pointer', transition: 'all 0.3s ease', textTransform: 'uppercase' }}
             >
               Run Batch Analysis
             </motion.button>
           ) : (
-            // INTERACTIVE PROGRESS BAR UI
             <motion.div 
               initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
-              style={{ width: '100%', padding: '30px', background: 'rgba(15, 23, 42, 0.8)', border: '1px solid rgba(56, 189, 248, 0.3)', borderRadius: '20px', boxShadow: '0 0 30px rgba(56, 189, 248, 0.1)', textAlign: 'center' }}
+              // THE FIX: Added boxSizing: 'border-box' below
+              style={{ boxSizing: 'border-box', width: '100%', padding: '30px', background: 'rgba(15, 23, 42, 0.8)', border: '1px solid rgba(56, 189, 248, 0.3)', borderRadius: '20px', boxShadow: '0 0 30px rgba(56, 189, 248, 0.1)', textAlign: 'center' }}
             >
               <h3 style={{ color: '#f8fafc', margin: '0 0 10px 0', fontSize: '1.2rem' }}>Executing Pipeline...</h3>
               <p style={{ color: '#38bdf8', fontSize: '0.9rem', marginBottom: '20px', height: '20px' }}>{loadingStatus}</p>
@@ -321,7 +334,7 @@ export default function Home() {
           )}
         </motion.div>
         
-        {/* --- STATISTICAL DASHBOARD (RESULTS) --- */}
+        {/* STATISTICAL DASHBOARD (RESULTS) */}
         <AnimatePresence>
           {results && (
             <motion.div initial={{ opacity: 0, y: 50, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 50, scale: 0.95 }} transition={{ duration: 0.5, type: "spring", bounce: 0.3 }} style={{ marginTop: '60px' }}>
@@ -344,28 +357,23 @@ export default function Home() {
                 
                 {/* Stats Grid */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px', marginBottom: '40px' }}>
-                  
-                  {/* Pearson Stat */}
                   <div style={{ padding: '30px', backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: '20px', border: '1px solid rgba(255,255,255,0.05)', textAlign: 'center' }}>
                     <p style={{ margin: 0, color: '#94a3b8', fontWeight: '700', textTransform: 'uppercase', fontSize: '0.85rem', letterSpacing: '1px' }}>Pearson (r)</p>
                     <h1 style={{ margin: '15px 0', fontSize: '3.5rem', color: '#38bdf8', fontWeight: '800' }}>{results.pearsonR}</h1>
                     <p style={{ margin: 0, color: '#64748b', fontSize: '0.8rem' }}>p = {results.pearsonP}</p>
                   </div>
 
-                  {/* Spearman Stat */}
                   <div style={{ padding: '30px', backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: '20px', border: '1px solid rgba(255,255,255,0.05)', textAlign: 'center' }}>
                     <p style={{ margin: 0, color: '#94a3b8', fontWeight: '700', textTransform: 'uppercase', fontSize: '0.85rem', letterSpacing: '1px' }}>Spearman (ρ)</p>
                     <h1 style={{ margin: '15px 0', fontSize: '3.5rem', color: '#fb923c', fontWeight: '800' }}>{results.spearmanR}</h1>
                     <p style={{ margin: 0, color: '#64748b', fontSize: '0.8rem' }}>p = {results.spearmanP}</p>
                   </div>
 
-                  {/* MAD Stat */}
                   <div style={{ padding: '30px', backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: '20px', border: '1px solid rgba(255,255,255,0.05)', textAlign: 'center' }}>
                     <p style={{ margin: 0, color: '#94a3b8', fontWeight: '700', textTransform: 'uppercase', fontSize: '0.85rem', letterSpacing: '1px' }}>Mean Abs Difference</p>
                     <h1 style={{ margin: '15px 0', fontSize: '3.5rem', color: '#10b981', fontWeight: '800' }}>{results.meanAbsDiff}</h1>
                     <p style={{ margin: 0, color: '#64748b', fontSize: '0.8rem' }}>Points deviation</p>
                   </div>
-
                 </div>
 
                 {/* Graph Render */}
@@ -413,7 +421,6 @@ export default function Home() {
                     </AnimatePresence>
                   </div>
                 )}
-
               </div>
             </motion.div>
           )}

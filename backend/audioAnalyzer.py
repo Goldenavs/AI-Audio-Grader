@@ -2,34 +2,27 @@ import whisper
 import os
 import csv
 
-AUDIO_FOLDER = "audio"
-OUTPUT_CSV = "transcripts.csv"
+print("Loading Whisper AI model into RAM... (This will only happen once)")
+# Load model globally so it stays in memory between API calls
+model = whisper.load_model("small")
+print("✅ Whisper Model cached in memory!")
 
-# audioAnalyzer.py
+def run_transcription(audio_folder: str, output_csv: str, progress_cb):
+    progress_cb("✅ Model is loaded! Starting transcription...")
+    results = []
+    
+    for filename in sorted(os.listdir(audio_folder)):
+        if filename.lower().endswith((".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg")):
+            filepath = os.path.join(audio_folder, filename)
+            
+            progress_cb(f"Transcribing: {filename}...")
+            result = model.transcribe(filepath, language="en")
+            text = result["text"].strip()
+            results.append([filename, text])
 
-print("Loading Whisper AI model into memory (this may take 1-2 minutes on CPU)...")
-
-# Load model (choose: tiny, base, small, medium, large)
-model = whisper.load_model("small")  # good balance of speed + accuracy
-
-print("✅ Model loaded successfully! Starting transcription...")
-
-results = []
-
-for filename in sorted(os.listdir(AUDIO_FOLDER)):
-    if filename.lower().endswith((".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg")):
-        filepath = os.path.join(AUDIO_FOLDER, filename)
-
-        print(f"Transcribing: {filename}...")
-        result = model.transcribe(filepath, language="en")  # "tl" if Filipino/Tagalog
-        text = result["text"].strip()
-
-        results.append([filename, text])
-
-# Save output to CSV
-with open(OUTPUT_CSV, "w", newline="", encoding="utf-8") as f:
-    writer = csv.writer(f)
-    writer.writerow(["audio_file", "transcript"])
-    writer.writerows(results)
-
-print(f"\n✅ Done! Saved transcripts to {OUTPUT_CSV}")
+    with open(output_csv, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["audio_file", "transcript"])
+        writer.writerows(results)
+        
+    progress_cb(f"✅ Done! Saved transcripts to {output_csv}")
