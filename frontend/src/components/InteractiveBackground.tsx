@@ -84,7 +84,12 @@ const InteractiveBackground = () => {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
       particles = [];
-      const particleCount = Math.floor((canvas.width * canvas.height) / 12000);
+      
+      // OPTIMIZATION: Calculate dynamic count, but cap it at 120 particles 
+      // to prevent lag on 4K projectors/displays.
+      const rawCount = Math.floor((canvas.width * canvas.height) / 12000);
+      const particleCount = Math.min(rawCount, 120); 
+      
       for (let i = 0; i < particleCount; i++) {
         particles.push(new Particle(canvas.width, canvas.height));
       }
@@ -153,7 +158,6 @@ const InteractiveBackground = () => {
         animate={{ scale: [1, 1.1, 1] }}
         transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
         style={{ 
-          // Combined styles here:
           x: smoothX, 
           y: smoothY, 
           background: 'radial-gradient(circle, rgba(56,189,248,0.12) 0%, rgba(251,146,60,0.05) 40%, rgba(0,0,0,0) 70%)',

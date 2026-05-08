@@ -27,10 +27,17 @@ const FileAudioIcon = () => (<svg width="24" height="24" viewBox="0 0 24 24" fil
 const CsvIcon = () => (<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fb923c" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="8" y1="13" x2="16" y2="13"></line><line x1="8" y1="17" x2="16" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>);
 const PowerIcon = () => (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>);
 const TextIcon = () => (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="21" y1="10" x2="3" y2="10"></line><line x1="21" y1="6" x2="3" y2="6"></line><line x1="21" y1="14" x2="3" y2="14"></line><line x1="14" y1="18" x2="3" y2="18"></line></svg>);
+const TargetIcon = () => (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg>);
 
 export default function Home() {
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [results, setResults] = useState<BatchResults | null>(null);
+  
+  // Custom Error State for UI Polish
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Precision Toggle State
+  const [showFullDecimals, setShowFullDecimals] = useState<boolean>(false);
 
   // Progress Bar State
   const [progress, setProgress] = useState<number>(0);
@@ -48,6 +55,19 @@ export default function Home() {
   const [humanScoresFile, setHumanScoresFile] = useState<File | null>(null);
   const [isDraggingCsv, setIsDraggingCsv] = useState<boolean>(false);
   const csvInputRef = useRef<HTMLInputElement>(null);
+
+  // Math Formatter helper
+  const formatStat = (num: number | undefined) => {
+    if (typeof num !== 'number') return num;
+    if (showFullDecimals) return num.toString();
+    return num.toFixed(3);
+  };
+
+  // Helper to show errors gracefully
+  const showError = (msg: string) => {
+    setErrorMessage(msg);
+    setTimeout(() => setErrorMessage(null), 5000);
+  };
 
   // Helper to recursively read dropped folders
   const getFilesFromEntry = async (entry: any): Promise<File[]> => {
@@ -73,8 +93,9 @@ export default function Home() {
     const audioOnly = files.filter(f => f.type.startsWith('audio/') || f.name.match(/\.(mp3|wav|m4a|aac|flac|ogg)$/i));
     if (audioOnly.length > 0) {
       setAudioFiles(audioOnly);
+      setErrorMessage(null); // Clear any existing errors
     } else {
-      alert("No valid audio files found in the selected folder.");
+      showError("No valid audio files found in the selected folder.");
     }
   };
 
@@ -107,8 +128,9 @@ export default function Home() {
   const handleCsvFile = (file: File) => {
     if (file.name.endsWith('.csv')) {
       setHumanScoresFile(file);
+      setErrorMessage(null); // Clear errors
     } else {
-      alert("Please upload a valid CSV file (e.g., human_scores.csv).");
+      showError("Please upload a valid CSV file (e.g., human_scores.csv).");
     }
   };
 
@@ -125,6 +147,7 @@ export default function Home() {
     setProgress(0);
     setLoadingStatus("Connecting to backend pipeline...");
     setShowTranscripts(false);
+    setShowFullDecimals(false); // Reset decimal toggle on new run
     
     const formData = new FormData();
     formData.append("human_scores", humanScoresFile);
@@ -138,47 +161,36 @@ export default function Home() {
         body: formData,
       });
 
-      if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+      if (!response.ok) throw new Error(`HTTP Error: ${response.status} - Backend connection failed.`);
       if (!response.body) throw new Error("ReadableStream not supported by browser.");
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder("utf-8");
       
-      // THE FIX: An accumulator to hold incomplete chunks of data
       let buffer = "";
 
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
 
-        // Append the new incoming chunk to our existing buffer
         buffer += decoder.decode(value, { stream: true });
-
-        // Look for the newline character which tells us a JSON string is complete
         let boundary = buffer.indexOf("\n");
 
         while (boundary !== -1) {
-          // Extract the complete line
           const line = buffer.slice(0, boundary).trim();
-          
-          // Remove the processed line from the buffer
           buffer = buffer.slice(boundary + 1);
-          
-          // Check for the next newline in case multiple lines arrived at once
           boundary = buffer.indexOf("\n");
 
           if (!line) continue;
 
-          // 1. SAFELY PARSE JSON FIRST
           let parsed;
           try {
             parsed = JSON.parse(line);
           } catch (err) {
             console.error("Stream parse error on line:", line);
-            continue; // Skip this broken line but keep the stream alive
+            continue; 
           }
           
-          // 2. HANDLE BUSINESS LOGIC OUTSIDE THE TRY/CATCH
           if (parsed.type === "progress") {
             setLoadingStatus(parsed.message);
             setProgress(prev => Math.min(prev + (Math.random() * 5), 95)); 
@@ -192,7 +204,6 @@ export default function Home() {
             }, 800);
           }
           else if (parsed.type === "error") {
-            // This will now successfully escape the stream loop and trigger the outer catch block!
             throw new Error(parsed.message);
           }
         }
@@ -201,7 +212,7 @@ export default function Home() {
       setProgress(0);
       setIsProcessing(false);
       console.error(error);
-      alert(`Processing Failed:\n${error.message}`);
+      showError(error.message || "Failed to connect to processing pipeline.");
     } 
   };
 
@@ -212,6 +223,30 @@ export default function Home() {
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', position: 'relative' }}>
       <InteractiveBackground />
       
+      {/* Animated Error Toast */}
+      <AnimatePresence>
+        {errorMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: -50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -50, scale: 0.9 }}
+            style={{ 
+              position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)', 
+              zIndex: 1000, background: 'rgba(220, 38, 38, 0.9)', backdropFilter: 'blur(10px)', 
+              padding: '16px 24px', borderRadius: '14px', border: '1px solid rgba(255,255,255,0.2)', 
+              color: 'white', display: 'flex', alignItems: 'center', gap: '20px', 
+              boxShadow: '0 10px 30px rgba(0,0,0,0.5)', minWidth: '300px', justifyContent: 'space-between'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+              <span style={{ fontWeight: '500', fontSize: '0.95rem' }}>{errorMessage}</span>
+            </div>
+            <button onClick={() => setErrorMessage(null)} style={{ background: 'rgba(0,0,0,0.2)', border: 'none', color: 'white', cursor: 'pointer', fontSize: '1rem', padding: '4px 8px', borderRadius: '6px' }}>✕</button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <motion.div 
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.5 }}
         style={{ padding: '80px 20px', maxWidth: '1100px', margin: '0 auto', width: '100%', boxSizing: 'border-box', zIndex: 1 }}
@@ -307,7 +342,6 @@ export default function Home() {
             <motion.button 
               whileHover={{ scale: !isFormReady ? 1 : 1.01 }} whileTap={{ scale: !isFormReady ? 1 : 0.98 }}
               onClick={startAnalysis} disabled={!isFormReady}
-              // THE FIX: Added boxSizing: 'border-box' below
               style={{ boxSizing: 'border-box', width: '100%', padding: '24px', fontSize: '1.2rem', fontWeight: '700', letterSpacing: '2px', background: !isFormReady ? 'rgba(30, 41, 59, 0.5)' : 'linear-gradient(90deg, #0284c7, #ea580c)', color: !isFormReady ? '#64748b' : 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '20px', cursor: !isFormReady ? 'not-allowed' : 'pointer', transition: 'all 0.3s ease', textTransform: 'uppercase' }}
             >
               Run Batch Analysis
@@ -315,7 +349,6 @@ export default function Home() {
           ) : (
             <motion.div 
               initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
-              // THE FIX: Added boxSizing: 'border-box' below
               style={{ boxSizing: 'border-box', width: '100%', padding: '30px', background: 'rgba(15, 23, 42, 0.8)', border: '1px solid rgba(56, 189, 248, 0.3)', borderRadius: '20px', boxShadow: '0 0 30px rgba(56, 189, 248, 0.1)', textAlign: 'center' }}
             >
               <h3 style={{ color: '#f8fafc', margin: '0 0 10px 0', fontSize: '1.2rem' }}>Executing Pipeline...</h3>
@@ -342,7 +375,7 @@ export default function Home() {
                 <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '4px', background: 'linear-gradient(90deg, #38bdf8, #fb923c, #38bdf8)', backgroundSize: '200% auto', animation: 'gradientFlow 3s linear infinite' }} />
                 
                 <motion.button
-                  onClick={() => { setResults(null); setShowTranscripts(false); }}
+                  onClick={() => { setResults(null); setShowTranscripts(false); setShowFullDecimals(false); }}
                   whileHover={{ scale: 1.05, backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.4)', boxShadow: '0 0 20px rgba(239, 68, 68, 0.2)' }}
                   whileTap={{ scale: 0.95 }}
                   style={{ position: 'absolute', top: '25px', right: '25px', display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', backgroundColor: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '20px', color: '#94a3b8', fontSize: '0.75rem', fontWeight: '700', letterSpacing: '1px', cursor: 'pointer', transition: 'all 0.3s ease', textTransform: 'uppercase', zIndex: 10 }}
@@ -353,25 +386,49 @@ export default function Home() {
                 <div style={{ textAlign: 'center', marginBottom: '50px', marginTop: '20px' }}>
                   <h2 style={{ margin: 0, color: '#f8fafc', fontSize: '2.5rem', fontWeight: '800', letterSpacing: '-1px' }}>Regression Analysis</h2>
                   <p style={{ color: '#94a3b8', marginTop: '10px', fontSize: '1.1rem' }}>Final Dataset Matched Rows: <span style={{ color: '#38bdf8', fontWeight: '700' }}>{results.totalRows}</span></p>
+                  
+                  {/* PRECISION TOGGLE */}
+                  <motion.button
+                    onClick={() => setShowFullDecimals(!showFullDecimals)}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    style={{ 
+                      marginTop: '20px', padding: '8px 16px', display: 'inline-flex', alignItems: 'center', gap: '8px',
+                      backgroundColor: showFullDecimals ? 'rgba(56, 189, 248, 0.15)' : 'rgba(255,255,255,0.05)',
+                      border: `1px solid ${showFullDecimals ? 'rgba(56, 189, 248, 0.4)' : 'rgba(255,255,255,0.1)'}`,
+                      color: showFullDecimals ? '#38bdf8' : '#94a3b8', borderRadius: '20px',
+                      cursor: 'pointer', fontSize: '0.8rem', fontWeight: '600', transition: 'all 0.3s ease'
+                    }}
+                  >
+                    <TargetIcon /> {showFullDecimals ? "Viewing Raw Precision" : "View Raw Precision"}
+                  </motion.button>
                 </div>
                 
                 {/* Stats Grid */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px', marginBottom: '40px' }}>
-                  <div style={{ padding: '30px', backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: '20px', border: '1px solid rgba(255,255,255,0.05)', textAlign: 'center' }}>
+                  <div style={{ padding: '30px', backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: '20px', border: '1px solid rgba(255,255,255,0.05)', textAlign: 'center', overflow: 'hidden' }}>
                     <p style={{ margin: 0, color: '#94a3b8', fontWeight: '700', textTransform: 'uppercase', fontSize: '0.85rem', letterSpacing: '1px' }}>Pearson (r)</p>
-                    <h1 style={{ margin: '15px 0', fontSize: '3.5rem', color: '#38bdf8', fontWeight: '800' }}>{results.pearsonR}</h1>
-                    <p style={{ margin: 0, color: '#64748b', fontSize: '0.8rem' }}>p = {results.pearsonP}</p>
+                    {/* Applying formatter here */}
+                    <h1 style={{ margin: '15px 0', fontSize: showFullDecimals ? '2rem' : '3.5rem', color: '#38bdf8', fontWeight: '800', transition: 'all 0.3s', wordBreak: 'break-all' }}>
+                      {formatStat(results.pearsonR)}
+                    </h1>
+                    <p style={{ margin: 0, color: '#64748b', fontSize: '0.8rem', wordBreak: 'break-all' }}>p = {formatStat(results.pearsonP)}</p>
                   </div>
 
-                  <div style={{ padding: '30px', backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: '20px', border: '1px solid rgba(255,255,255,0.05)', textAlign: 'center' }}>
+                  <div style={{ padding: '30px', backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: '20px', border: '1px solid rgba(255,255,255,0.05)', textAlign: 'center', overflow: 'hidden' }}>
                     <p style={{ margin: 0, color: '#94a3b8', fontWeight: '700', textTransform: 'uppercase', fontSize: '0.85rem', letterSpacing: '1px' }}>Spearman (ρ)</p>
-                    <h1 style={{ margin: '15px 0', fontSize: '3.5rem', color: '#fb923c', fontWeight: '800' }}>{results.spearmanR}</h1>
-                    <p style={{ margin: 0, color: '#64748b', fontSize: '0.8rem' }}>p = {results.spearmanP}</p>
+                    <h1 style={{ margin: '15px 0', fontSize: showFullDecimals ? '2rem' : '3.5rem', color: '#fb923c', fontWeight: '800', transition: 'all 0.3s', wordBreak: 'break-all' }}>
+                      {formatStat(results.spearmanR)}
+                    </h1>
+                    <p style={{ margin: 0, color: '#64748b', fontSize: '0.8rem', wordBreak: 'break-all' }}>p = {formatStat(results.spearmanP)}</p>
                   </div>
 
-                  <div style={{ padding: '30px', backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: '20px', border: '1px solid rgba(255,255,255,0.05)', textAlign: 'center' }}>
+                  <div style={{ padding: '30px', backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: '20px', border: '1px solid rgba(255,255,255,0.05)', textAlign: 'center', overflow: 'hidden' }}>
                     <p style={{ margin: 0, color: '#94a3b8', fontWeight: '700', textTransform: 'uppercase', fontSize: '0.85rem', letterSpacing: '1px' }}>Mean Abs Difference</p>
-                    <h1 style={{ margin: '15px 0', fontSize: '3.5rem', color: '#10b981', fontWeight: '800' }}>{results.meanAbsDiff}</h1>
+                    <h1 style={{ margin: '15px 0', fontSize: '3.5rem', color: '#10b981', fontWeight: '800' }}>
+                      {/* meanAbsDiff is pre-rounded in Python to 2 decimals, so it doesn't need the formatter toggle */}
+                      {results.meanAbsDiff.toFixed(2)}
+                    </h1>
                     <p style={{ margin: 0, color: '#64748b', fontSize: '0.8rem' }}>Points deviation</p>
                   </div>
                 </div>

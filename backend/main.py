@@ -31,26 +31,34 @@ async def batch_analyze(
     audio_files: list[UploadFile] = File(...)
 ):
     
-    # 1. Clean and Setup Directories
-    if os.path.exists("audio"):
-        shutil.rmtree("audio")
-    os.makedirs("audio", exist_ok=True)
-
-    with open("human_scores.csv", "wb") as f:
-        shutil.copyfileobj(human_scores.file, f)
-
-    for af in audio_files:
-        with open(os.path.join("audio", af.filename), "wb") as f:
-            shutil.copyfileobj(af.file, f)
-
-    # 2. Setup the Stream Queue
+    # 1. Setup the Stream Queue
     q = asyncio.Queue()
     loop = asyncio.get_running_loop()
 
-    # The callback that your modules will use to send progress
     def progress_cb(message: str):
         payload = json.dumps({"type": "progress", "message": message}) + "\n"
         asyncio.run_coroutine_threadsafe(q.put(payload), loop)
+
+    # 2. File Prep with Safety Net
+    try:
+        if os.path.exists("audio"):
+            shutil.rmtree("audio")
+        os.makedirs("audio", exist_ok=True)
+
+        with open("human_scores.csv", "wb") as f:
+            shutil.copyfileobj(human_scores.file, f)
+
+        for af in audio_files:
+            with open(os.path.join("audio", af.filename), "wb") as f:
+                shutil.copyfileobj(af.file, f)
+                
+    except Exception as e:
+        # If disk/file saving fails, queue the error immediately so the frontend handles it cleanly
+        q.put_nowait(json.dumps({"type": "error", "message": f"Server File Error: {str(e)}"}) + "\n")
+        
+        async def fast_fail():
+            yield await q.get()
+        return StreamingResponse(fast_fail(), media_type="application/x-ndjson")
 
     # 3. The Background Task
     def run_pipeline():
