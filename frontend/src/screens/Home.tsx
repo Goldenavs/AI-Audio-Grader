@@ -27,7 +27,6 @@ const FileAudioIcon = () => (<svg width="24" height="24" viewBox="0 0 24 24" fil
 const CsvIcon = () => (<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fb923c" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="8" y1="13" x2="16" y2="13"></line><line x1="8" y1="17" x2="16" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>);
 const PowerIcon = () => (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>);
 const TextIcon = () => (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="21" y1="10" x2="3" y2="10"></line><line x1="21" y1="6" x2="3" y2="6"></line><line x1="21" y1="14" x2="3" y2="14"></line><line x1="14" y1="18" x2="3" y2="18"></line></svg>);
-const TargetIcon = () => (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg>);
 
 export default function Home() {
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
@@ -35,9 +34,6 @@ export default function Home() {
   
   // Custom Error State for UI Polish
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  // Precision Toggle State
-  const [showFullDecimals, setShowFullDecimals] = useState<boolean>(false);
 
   // Progress Bar State
   const [progress, setProgress] = useState<number>(0);
@@ -55,13 +51,6 @@ export default function Home() {
   const [humanScoresFile, setHumanScoresFile] = useState<File | null>(null);
   const [isDraggingCsv, setIsDraggingCsv] = useState<boolean>(false);
   const csvInputRef = useRef<HTMLInputElement>(null);
-
-  // Math Formatter helper
-  const formatStat = (num: number | undefined) => {
-    if (typeof num !== 'number') return num;
-    if (showFullDecimals) return num.toString();
-    return num.toFixed(3);
-  };
 
   // Helper to show errors gracefully
   const showError = (msg: string) => {
@@ -147,7 +136,6 @@ export default function Home() {
     setProgress(0);
     setLoadingStatus("Connecting to backend pipeline...");
     setShowTranscripts(false);
-    setShowFullDecimals(false); // Reset decimal toggle on new run
     
     const formData = new FormData();
     formData.append("human_scores", humanScoresFile);
@@ -375,7 +363,7 @@ export default function Home() {
                 <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '4px', background: 'linear-gradient(90deg, #38bdf8, #fb923c, #38bdf8)', backgroundSize: '200% auto', animation: 'gradientFlow 3s linear infinite' }} />
                 
                 <motion.button
-                  onClick={() => { setResults(null); setShowTranscripts(false); setShowFullDecimals(false); }}
+                  onClick={() => { setResults(null); setShowTranscripts(false); }}
                   whileHover={{ scale: 1.05, backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.4)', boxShadow: '0 0 20px rgba(239, 68, 68, 0.2)' }}
                   whileTap={{ scale: 0.95 }}
                   style={{ position: 'absolute', top: '25px', right: '25px', display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', backgroundColor: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '20px', color: '#94a3b8', fontSize: '0.75rem', fontWeight: '700', letterSpacing: '1px', cursor: 'pointer', transition: 'all 0.3s ease', textTransform: 'uppercase', zIndex: 10 }}
@@ -386,47 +374,29 @@ export default function Home() {
                 <div style={{ textAlign: 'center', marginBottom: '50px', marginTop: '20px' }}>
                   <h2 style={{ margin: 0, color: '#f8fafc', fontSize: '2.5rem', fontWeight: '800', letterSpacing: '-1px' }}>Regression Analysis</h2>
                   <p style={{ color: '#94a3b8', marginTop: '10px', fontSize: '1.1rem' }}>Final Dataset Matched Rows: <span style={{ color: '#38bdf8', fontWeight: '700' }}>{results.totalRows}</span></p>
-                  
-                  {/* PRECISION TOGGLE */}
-                  <motion.button
-                    onClick={() => setShowFullDecimals(!showFullDecimals)}
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    style={{ 
-                      marginTop: '20px', padding: '8px 16px', display: 'inline-flex', alignItems: 'center', gap: '8px',
-                      backgroundColor: showFullDecimals ? 'rgba(56, 189, 248, 0.15)' : 'rgba(255,255,255,0.05)',
-                      border: `1px solid ${showFullDecimals ? 'rgba(56, 189, 248, 0.4)' : 'rgba(255,255,255,0.1)'}`,
-                      color: showFullDecimals ? '#38bdf8' : '#94a3b8', borderRadius: '20px',
-                      cursor: 'pointer', fontSize: '0.8rem', fontWeight: '600', transition: 'all 0.3s ease'
-                    }}
-                  >
-                    <TargetIcon /> {showFullDecimals ? "Viewing Raw Precision" : "View Raw Precision"}
-                  </motion.button>
                 </div>
                 
                 {/* Stats Grid */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px', marginBottom: '40px' }}>
                   <div style={{ padding: '30px', backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: '20px', border: '1px solid rgba(255,255,255,0.05)', textAlign: 'center', overflow: 'hidden' }}>
                     <p style={{ margin: 0, color: '#94a3b8', fontWeight: '700', textTransform: 'uppercase', fontSize: '0.85rem', letterSpacing: '1px' }}>Pearson (r)</p>
-                    {/* Applying formatter here */}
-                    <h1 style={{ margin: '15px 0', fontSize: showFullDecimals ? '2rem' : '3.5rem', color: '#38bdf8', fontWeight: '800', transition: 'all 0.3s', wordBreak: 'break-all' }}>
-                      {formatStat(results.pearsonR)}
+                    <h1 style={{ margin: '15px 0', fontSize: '2.2rem', color: '#38bdf8', fontWeight: '800', wordBreak: 'break-all' }}>
+                      {results.pearsonR}
                     </h1>
-                    <p style={{ margin: 0, color: '#64748b', fontSize: '0.8rem', wordBreak: 'break-all' }}>p = {formatStat(results.pearsonP)}</p>
+                    <p style={{ margin: 0, color: '#64748b', fontSize: '0.8rem', wordBreak: 'break-all' }}>p = {results.pearsonP}</p>
                   </div>
 
                   <div style={{ padding: '30px', backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: '20px', border: '1px solid rgba(255,255,255,0.05)', textAlign: 'center', overflow: 'hidden' }}>
                     <p style={{ margin: 0, color: '#94a3b8', fontWeight: '700', textTransform: 'uppercase', fontSize: '0.85rem', letterSpacing: '1px' }}>Spearman (ρ)</p>
-                    <h1 style={{ margin: '15px 0', fontSize: showFullDecimals ? '2rem' : '3.5rem', color: '#fb923c', fontWeight: '800', transition: 'all 0.3s', wordBreak: 'break-all' }}>
-                      {formatStat(results.spearmanR)}
+                    <h1 style={{ margin: '15px 0', fontSize: '2.2rem', color: '#fb923c', fontWeight: '800', wordBreak: 'break-all' }}>
+                      {results.spearmanR}
                     </h1>
-                    <p style={{ margin: 0, color: '#64748b', fontSize: '0.8rem', wordBreak: 'break-all' }}>p = {formatStat(results.spearmanP)}</p>
+                    <p style={{ margin: 0, color: '#64748b', fontSize: '0.8rem', wordBreak: 'break-all' }}>p = {results.spearmanP}</p>
                   </div>
 
                   <div style={{ padding: '30px', backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: '20px', border: '1px solid rgba(255,255,255,0.05)', textAlign: 'center', overflow: 'hidden' }}>
                     <p style={{ margin: 0, color: '#94a3b8', fontWeight: '700', textTransform: 'uppercase', fontSize: '0.85rem', letterSpacing: '1px' }}>Mean Abs Difference</p>
                     <h1 style={{ margin: '15px 0', fontSize: '3.5rem', color: '#10b981', fontWeight: '800' }}>
-                      {/* meanAbsDiff is pre-rounded in Python to 2 decimals, so it doesn't need the formatter toggle */}
                       {results.meanAbsDiff.toFixed(2)}
                     </h1>
                     <p style={{ margin: 0, color: '#64748b', fontSize: '0.8rem' }}>Points deviation</p>
