@@ -19,7 +19,7 @@ echo ==============================================
 echo   SYSTEM IS READY! 
 echo   Opening browser in 10 seconds...
 echo ==============================================
-timeout /t 10
+ping 127.0.0.1 -n 11 > nul
 start http://localhost:5173
 
 :: Auto-close this launcher window so the screen is completely clean

@@ -32,8 +32,12 @@ export default function Home() {
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [results, setResults] = useState<BatchResults | null>(null);
   
-  // Custom Error State for UI Polish
+  // Custom Error State
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Individual Precision Toggle States
+  const [showPearsonDecimals, setShowPearsonDecimals] = useState<boolean>(false);
+  const [showSpearmanDecimals, setShowSpearmanDecimals] = useState<boolean>(false);
 
   // Progress Bar State
   const [progress, setProgress] = useState<number>(0);
@@ -52,13 +56,18 @@ export default function Home() {
   const [isDraggingCsv, setIsDraggingCsv] = useState<boolean>(false);
   const csvInputRef = useRef<HTMLInputElement>(null);
 
-  // Helper to show errors gracefully
+  // Modified Math Formatter helper to take the specific toggle state
+  const formatStat = (num: number | undefined, showFull: boolean) => {
+    if (typeof num !== 'number') return num;
+    if (showFull) return num.toString();
+    return num.toFixed(3);
+  };
+
   const showError = (msg: string) => {
     setErrorMessage(msg);
     setTimeout(() => setErrorMessage(null), 5000);
   };
 
-  // Helper to recursively read dropped folders
   const getFilesFromEntry = async (entry: any): Promise<File[]> => {
     if (entry.isFile) {
       return new Promise((resolve) => {
@@ -77,22 +86,29 @@ export default function Home() {
     return [];
   };
 
-  // Shared Audio Filter
-  const processAudioFiles = (files: File[]) => {
-    const audioOnly = files.filter(f => f.type.startsWith('audio/') || f.name.match(/\.(mp3|wav|m4a|aac|flac|ogg)$/i));
+  const processAudioFiles = (newFiles: File[]) => {
+    const audioOnly = newFiles.filter(f => f.type.startsWith('audio/') || f.name.match(/\.(mp3|wav|m4a|aac|flac|ogg)$/i));
     if (audioOnly.length > 0) {
-      setAudioFiles(audioOnly);
-      setErrorMessage(null); // Clear any existing errors
+      setAudioFiles(prevFiles => {
+        const existingNames = new Set(prevFiles.map(f => f.name));
+        const uniqueNewFiles = audioOnly.filter(f => !existingNames.has(f.name));
+        return [...prevFiles, ...uniqueNewFiles];
+      });
+      setErrorMessage(null);
     } else {
       showError("No valid audio files found in the selected folder.");
     }
+  };
+
+  const removeAudioFile = (e: React.MouseEvent, fileNameToRemove: string) => {
+    e.stopPropagation();
+    setAudioFiles(prevFiles => prevFiles.filter(f => f.name !== fileNameToRemove));
   };
 
   const handleFolderChange = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) processAudioFiles(Array.from(e.target.files));
   };
 
-  // Drag & Drop Folder Handler
   const handleFolderDrop = async (e: DragEvent<HTMLDivElement>) => {
     preventDefaults(e);
     setIsDraggingMedia(false);
@@ -113,11 +129,10 @@ export default function Home() {
     }
   };
 
-  // Handlers for CSV Upload
   const handleCsvFile = (file: File) => {
     if (file.name.endsWith('.csv')) {
       setHumanScoresFile(file);
-      setErrorMessage(null); // Clear errors
+      setErrorMessage(null);
     } else {
       showError("Please upload a valid CSV file (e.g., human_scores.csv).");
     }
@@ -129,7 +144,6 @@ export default function Home() {
 
   const preventDefaults = (e: DragEvent<HTMLDivElement>) => e.preventDefault();
   
-  // Pipeline Execution (Real-Time Stream with BUFFERING)
   const startAnalysis = async () => {
     if (audioFiles.length === 0 || !humanScoresFile) return;
     setIsProcessing(true);
@@ -137,6 +151,13 @@ export default function Home() {
     setLoadingStatus("Connecting to backend pipeline...");
     setShowTranscripts(false);
     
+    // Reset individual precision toggles on new run
+    setShowPearsonDecimals(false); 
+    setShowSpearmanDecimals(false); 
+    
+    const expectedSteps = (audioFiles.length * 2) + 4;
+    let currentStep = 0;
+
     const formData = new FormData();
     formData.append("human_scores", humanScoresFile);
     audioFiles.forEach((file) => {
@@ -175,13 +196,14 @@ export default function Home() {
           try {
             parsed = JSON.parse(line);
           } catch (err) {
-            console.error("Stream parse error on line:", line);
             continue; 
           }
           
           if (parsed.type === "progress") {
+            currentStep += 1;
+            const calculatedProgress = Math.min((currentStep / expectedSteps) * 100, 95);
+            setProgress(calculatedProgress);
             setLoadingStatus(parsed.message);
-            setProgress(prev => Math.min(prev + (Math.random() * 5), 95)); 
           } 
           else if (parsed.type === "result") {
             setProgress(100);
@@ -199,7 +221,6 @@ export default function Home() {
     } catch (error: any) {
       setProgress(0);
       setIsProcessing(false);
-      console.error(error);
       showError(error.message || "Failed to connect to processing pipeline.");
     } 
   };
@@ -211,7 +232,6 @@ export default function Home() {
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', position: 'relative' }}>
       <InteractiveBackground />
       
-      {/* Animated Error Toast */}
       <AnimatePresence>
         {errorMessage && (
           <motion.div
@@ -258,7 +278,7 @@ export default function Home() {
             <GlowingCard accentColor="blue" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '25px' }}>
                 <div style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: '#38bdf8', boxShadow: '0 0 15px #38bdf8' }} />
-                <h3 style={{ margin: 0, color: '#f8fafc', fontSize: '1.3rem', fontWeight: '600' }}>Audio Dataset (Folder)</h3>
+                <h3 style={{ margin: 0, color: '#f8fafc', fontSize: '1.3rem', fontWeight: '600' }}>Audio Dataset</h3>
               </div>
               
               <motion.div 
@@ -272,11 +292,25 @@ export default function Home() {
                 <input type="file" ref={folderInputRef} onChange={handleFolderChange} style={{ display: 'none' }} {...{ webkitdirectory: "true", directory: "true" }} multiple />
                 
                 {audioFiles.length > 0 ? (
-                  <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                    <FileAudioIcon />
-                    <h2 style={{ color: '#f8fafc', fontWeight: '700', fontSize: '2.5rem', margin: '15px 0 5px 0' }}>{audioFiles.length}</h2>
-                    <p style={{ color: '#38bdf8', fontWeight: '600', margin: 0 }}>Audio Files Queued</p>
-                    <button onClick={(e) => { e.stopPropagation(); setAudioFiles([]); }} style={{ marginTop: '20px', padding: '8px 16px', backgroundColor: 'transparent', border: '1px solid rgba(255,255,255,0.2)', color: '#94a3b8', borderRadius: '8px', cursor: 'pointer', transition: 'all 0.2s' }} onMouseOver={e => e.currentTarget.style.color = '#fff'} onMouseOut={e => e.currentTarget.style.color = '#94a3b8'}>Clear Dataset</button>
+                  <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '15px' }}>
+                      <FileAudioIcon />
+                      <h2 style={{ color: '#f8fafc', fontWeight: '700', fontSize: '1.8rem', margin: 0 }}>{audioFiles.length} Files Queued</h2>
+                    </div>
+
+                    <div style={{ width: '100%', maxHeight: '120px', overflowY: 'auto', background: 'rgba(0,0,0,0.2)', borderRadius: '10px', padding: '10px', marginBottom: '15px' }}>
+                      {audioFiles.map((file, idx) => (
+                        <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 10px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                          <span style={{ color: '#e2e8f0', fontSize: '0.85rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '80%' }}>{file.name}</span>
+                          <button onClick={(e) => removeAudioFile(e, file.name)} style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '1.2rem', padding: '0 5px' }}>×</button>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '10px' }}>
+                      <button onClick={(e) => { e.stopPropagation(); folderInputRef.current?.click(); }} style={{ padding: '8px 16px', backgroundColor: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.3)', color: '#38bdf8', borderRadius: '8px', cursor: 'pointer', transition: 'all 0.2s', fontSize: '0.85rem' }}>+ Add More</button>
+                      <button onClick={(e) => { e.stopPropagation(); setAudioFiles([]); }} style={{ padding: '8px 16px', backgroundColor: 'transparent', border: '1px solid rgba(255,255,255,0.2)', color: '#94a3b8', borderRadius: '8px', cursor: 'pointer', transition: 'all 0.2s', fontSize: '0.85rem' }} onMouseOver={e => e.currentTarget.style.color = '#fff'} onMouseOut={e => e.currentTarget.style.color = '#94a3b8'}>Clear All</button>
+                    </div>
                   </motion.div>
                 ) : (
                   <>
@@ -363,7 +397,12 @@ export default function Home() {
                 <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '4px', background: 'linear-gradient(90deg, #38bdf8, #fb923c, #38bdf8)', backgroundSize: '200% auto', animation: 'gradientFlow 3s linear infinite' }} />
                 
                 <motion.button
-                  onClick={() => { setResults(null); setShowTranscripts(false); }}
+                  onClick={() => { 
+                    setResults(null); 
+                    setShowTranscripts(false); 
+                    setShowPearsonDecimals(false);
+                    setShowSpearmanDecimals(false);
+                  }}
                   whileHover={{ scale: 1.05, backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.4)', boxShadow: '0 0 20px rgba(239, 68, 68, 0.2)' }}
                   whileTap={{ scale: 0.95 }}
                   style={{ position: 'absolute', top: '25px', right: '25px', display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', backgroundColor: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '20px', color: '#94a3b8', fontSize: '0.75rem', fontWeight: '700', letterSpacing: '1px', cursor: 'pointer', transition: 'all 0.3s ease', textTransform: 'uppercase', zIndex: 10 }}
@@ -378,21 +417,36 @@ export default function Home() {
                 
                 {/* Stats Grid */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px', marginBottom: '40px' }}>
-                  <div style={{ padding: '30px', backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: '20px', border: '1px solid rgba(255,255,255,0.05)', textAlign: 'center', overflow: 'hidden' }}>
+                  
+                  {/* INDIVIDUAL PEARSON CARD */}
+                  <motion.div 
+                    onClick={() => setShowPearsonDecimals(!showPearsonDecimals)}
+                    whileHover={{ scale: 1.02, backgroundColor: 'rgba(255,255,255,0.05)' }}
+                    whileTap={{ scale: 0.98 }}
+                    style={{ cursor: 'pointer', padding: '30px', backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: '20px', border: '1px solid rgba(255,255,255,0.05)', textAlign: 'center', overflow: 'hidden', transition: 'background-color 0.3s' }}
+                  >
                     <p style={{ margin: 0, color: '#94a3b8', fontWeight: '700', textTransform: 'uppercase', fontSize: '0.85rem', letterSpacing: '1px' }}>Pearson (r)</p>
-                    <h1 style={{ margin: '15px 0', fontSize: '2.2rem', color: '#38bdf8', fontWeight: '800', wordBreak: 'break-all' }}>
-                      {results.pearsonR}
+                    <h1 style={{ margin: '15px 0', fontSize: showPearsonDecimals ? '2rem' : '3.5rem', color: '#38bdf8', fontWeight: '800', transition: 'all 0.3s', wordBreak: 'break-all' }}>
+                      {formatStat(results.pearsonR, showPearsonDecimals)}
                     </h1>
-                    <p style={{ margin: 0, color: '#64748b', fontSize: '0.8rem', wordBreak: 'break-all' }}>p = {results.pearsonP}</p>
-                  </div>
+                    <p style={{ margin: 0, color: '#64748b', fontSize: '0.8rem', wordBreak: 'break-all' }}>p = {formatStat(results.pearsonP, showPearsonDecimals)}</p>
+                    <p style={{ fontSize: '0.65rem', color: '#475569', marginTop: '10px', fontWeight: 600 }}>TAP TO TOGGLE PRECISION</p>
+                  </motion.div>
 
-                  <div style={{ padding: '30px', backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: '20px', border: '1px solid rgba(255,255,255,0.05)', textAlign: 'center', overflow: 'hidden' }}>
+                  {/* INDIVIDUAL SPEARMAN CARD */}
+                  <motion.div 
+                    onClick={() => setShowSpearmanDecimals(!showSpearmanDecimals)}
+                    whileHover={{ scale: 1.02, backgroundColor: 'rgba(255,255,255,0.05)' }}
+                    whileTap={{ scale: 0.98 }}
+                    style={{ cursor: 'pointer', padding: '30px', backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: '20px', border: '1px solid rgba(255,255,255,0.05)', textAlign: 'center', overflow: 'hidden', transition: 'background-color 0.3s' }}
+                  >
                     <p style={{ margin: 0, color: '#94a3b8', fontWeight: '700', textTransform: 'uppercase', fontSize: '0.85rem', letterSpacing: '1px' }}>Spearman (ρ)</p>
-                    <h1 style={{ margin: '15px 0', fontSize: '2.2rem', color: '#fb923c', fontWeight: '800', wordBreak: 'break-all' }}>
-                      {results.spearmanR}
+                    <h1 style={{ margin: '15px 0', fontSize: showSpearmanDecimals ? '2rem' : '3.5rem', color: '#fb923c', fontWeight: '800', transition: 'all 0.3s', wordBreak: 'break-all' }}>
+                      {formatStat(results.spearmanR, showSpearmanDecimals)}
                     </h1>
-                    <p style={{ margin: 0, color: '#64748b', fontSize: '0.8rem', wordBreak: 'break-all' }}>p = {results.spearmanP}</p>
-                  </div>
+                    <p style={{ margin: 0, color: '#64748b', fontSize: '0.8rem', wordBreak: 'break-all' }}>p = {formatStat(results.spearmanP, showSpearmanDecimals)}</p>
+                    <p style={{ fontSize: '0.65rem', color: '#475569', marginTop: '10px', fontWeight: 600 }}>TAP TO TOGGLE PRECISION</p>
+                  </motion.div>
 
                   <div style={{ padding: '30px', backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: '20px', border: '1px solid rgba(255,255,255,0.05)', textAlign: 'center', overflow: 'hidden' }}>
                     <p style={{ margin: 0, color: '#94a3b8', fontWeight: '700', textTransform: 'uppercase', fontSize: '0.85rem', letterSpacing: '1px' }}>Mean Abs Difference</p>
