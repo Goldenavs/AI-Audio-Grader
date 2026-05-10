@@ -14,6 +14,8 @@ python -m venv venv
 
 Create a .env file in the backend containing GEMINI_API_KEY=your_key_here (https://aistudio.google.com/app/api-keys)
 
+.\venv\Scripts\activate
+
 pip install -r requirements.txt
 
 cd frontend
@@ -26,7 +28,7 @@ or manually run:
 
 cd backend
 
-venv\Scripts\activate
+.\venv\Scripts\activate
 
 python main.py or uvicorn main:app --reload
 
